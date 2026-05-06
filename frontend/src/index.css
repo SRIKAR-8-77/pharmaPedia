@@ -1,0 +1,69 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Backgrounds */
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f5f5f2;
+  --color-background-hover: #efefeb;
+  --color-background-info: #e6f1fb;
+
+  /* Text */
+  --color-text-primary: #1a1a18;
+  --color-text-secondary: #78786e;
+  --color-text-info: #185fa5;
+
+  /* Borders */
+  --color-border-primary: #808078;
+  --color-border-secondary: #c0c0b8;
+  --color-border-tertiary: #e0e0d8;
+
+  /* Radius & fonts */
+  --border-radius-lg: 8px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+
+  --sidebar-width: 160px;
+
+  /* Semantic status */
+  --color-green:      #639922;
+  --color-green-bg:   #eaf3de;
+  --color-green-text: #3b6d11;
+
+  --color-amber:      #ef9f27;
+  --color-amber-bg:   #faeeda;
+  --color-amber-text: #854f0b;
+
+  --color-red:        #e24b4a;
+  --color-red-bg:     #fcebeb;
+  --color-red-text:   #a32d2d;
+
+  --color-blue:       #378add;
+  --color-blue-bg:    #e6f1fb;
+  --color-blue-text:  #185fa5;
+
+  --color-purple:     #534ab7;
+  --color-purple-bg:  #eeedfe;
+  --color-purple-text:#3d35a0;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; font-family: inherit; }
+input, textarea, select { font-family: inherit; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-secondary); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-primary); }
+
+/* ── Spin animation used by agent steps ──────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }

@@ -1,0 +1,56 @@
+# ── Phase 1: Core (install now) ──────────────────────────────────────────────
+
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# Database
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.3
+psycopg2-binary==2.9.9
+
+# Task queue
+celery[redis]==5.4.0
+redis==5.1.0
+
+# Reddit ingestion
+praw==7.7.1
+
+# RSS feed
+feedparser==6.0.11
+
+# HTTP client
+httpx==0.27.2
+aiohttp>=3.11.0
+
+# Config
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# AI — Gemini Flash (primary: copilot + source discovery)
+google-genai>=1.0.0
+
+# AI — Anthropic (kept for reference, no longer used)
+anthropic==0.34.2
+
+# Source discovery — free, no API key (replaces SerpAPI)
+duckduckgo-search==6.3.4
+lxml>=5.0.0          # enables DDG html backend (avoids rate-limited JS API)
+
+# Sentiment (VADER fallback — lightweight, no GPU)
+vaderSentiment==3.3.2
+
+# NLP — PII detection + entity NER
+spacy==3.8.14
+presidio-analyzer==2.2.354
+presidio-anonymizer==2.2.354
+
+# Deduplication
+datasketch==1.6.5
+
+# Utilities
+websockets==13.0.1
+orjson==3.10.7
