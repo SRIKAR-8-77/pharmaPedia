@@ -1,6 +1,8 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getDashboardStats, getProject, listSignals } from "../api/client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getDashboardStats, getProject, listSignals, getProjectSources, triggerScrape, runPipeline, pauseProject, resumeProject } from "../api/client";
+import { RefreshCw, Zap, PauseCircle, PlayCircle } from "lucide-react";
+import toast from "react-hot-toast";
 
 const SEV_STYLE = {
   HIGH: { bg: "var(--color-red-bg)",   color: "var(--color-red-text)" },
@@ -90,6 +92,183 @@ function SignalItem({ sig, onNavigate }) {
   );
 }
 
+// ── Pipeline status panel ─────────────────────────────────────────────────────
+
+const STATUS_DOT = {
+  active:   "var(--color-green)",
+  healthy:  "var(--color-green)",
+  degraded: "var(--color-amber)",
+  healing:  "var(--color-amber)",
+  error:    "var(--color-red)",
+  paused:   "var(--color-border-secondary)",
+  pending:  "var(--color-border-secondary)",
+};
+
+function PipelineStatus({ projectId, isPaused }) {
+  const qc = useQueryClient();
+
+  const { data: sources = [], isFetching } = useQuery({
+    queryKey: ["project-sources", projectId],
+    queryFn: () => getProjectSources(projectId),
+    refetchInterval: 10000,
+  });
+
+  const scrapeMut = useMutation({
+    mutationFn: () => triggerScrape(projectId),
+    onSuccess: () => {
+      toast.success("Scrape job queued — sources are being polled");
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["project-sources", projectId] }), 4000);
+    },
+    onError: (e) => toast.error(e?.response?.data?.detail || "Failed to queue scrape"),
+  });
+
+  const pipelineMut = useMutation({
+    mutationFn: () => runPipeline(projectId),
+    onSuccess: () => {
+      toast.success("NLP pipeline started — posts are being enriched");
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["stats", projectId] });
+        qc.invalidateQueries({ queryKey: ["signals-high", projectId] });
+      }, 6000);
+    },
+    onError: (e) => toast.error(e?.response?.data?.detail || "Failed to start pipeline"),
+  });
+
+  const pauseMut = useMutation({
+    mutationFn: () => isPaused ? resumeProject(projectId) : pauseProject(projectId),
+    onSuccess: () => {
+      toast.success(isPaused ? "Jobs resumed — scraping and pipeline will run again" : "Jobs paused — no new data will be fetched");
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+    },
+    onError: (e) => toast.error(e?.response?.data?.detail || "Failed to update project"),
+  });
+
+  const fmtTime = (iso) => {
+    if (!iso) return "never";
+    const d = new Date(iso);
+    const diffMin = Math.round((Date.now() - d) / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffH = Math.round(diffMin / 60);
+    if (diffH < 24) return `${diffH}h ago`;
+    return d.toLocaleDateString();
+  };
+
+  return (
+    <div style={{
+      background: "var(--color-background-primary)",
+      border: "0.5px solid var(--color-border-tertiary)",
+      borderRadius: 6, padding: "8px 10px", marginBottom: 8,
+    }}>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", flex: 1 }}>
+          Pipeline status
+          {isPaused && (
+            <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: "var(--color-amber-bg)", color: "var(--color-amber-text)", fontWeight: 600, letterSpacing: "0.04em" }}>
+              PAUSED
+            </span>
+          )}
+          {isFetching && (
+            <RefreshCw size={9} style={{ animation: "spin 1.2s linear infinite", opacity: 0.4 }} />
+          )}
+        </span>
+        <button
+          onClick={() => pauseMut.mutate()}
+          disabled={pauseMut.isPending}
+          title={isPaused ? "Resume scraping and pipeline jobs" : "Pause all scraping and pipeline jobs"}
+          style={{
+            fontSize: 9, padding: "2px 8px", borderRadius: 3, cursor: "pointer",
+            border: isPaused ? "0.5px solid var(--color-green-text)" : "0.5px solid var(--color-amber-text)",
+            background: "transparent",
+            color: isPaused ? "var(--color-green-text)" : "var(--color-amber-text)",
+            display: "flex", alignItems: "center", gap: 3,
+            opacity: pauseMut.isPending ? 0.5 : 1,
+          }}
+        >
+          {isPaused
+            ? <><PlayCircle size={9} /> {pauseMut.isPending ? "Resuming…" : "Resume jobs"}</>
+            : <><PauseCircle size={9} /> {pauseMut.isPending ? "Pausing…" : "Pause jobs"}</>
+          }
+        </button>
+        <button
+          onClick={() => scrapeMut.mutate()}
+          disabled={scrapeMut.isPending || isPaused}
+          title={isPaused ? "Resume jobs first" : "Pull new posts from all sources now"}
+          style={{
+            fontSize: 9, padding: "2px 8px", borderRadius: 3, cursor: isPaused ? "not-allowed" : "pointer",
+            border: "0.5px solid var(--color-border-secondary)",
+            background: "var(--color-background-secondary)",
+            color: "var(--color-text-secondary)",
+            display: "flex", alignItems: "center", gap: 3,
+            opacity: (scrapeMut.isPending || isPaused) ? 0.4 : 1,
+          }}
+        >
+          <RefreshCw size={9} /> {scrapeMut.isPending ? "Queuing…" : "Scrape now"}
+        </button>
+        <button
+          onClick={() => pipelineMut.mutate()}
+          disabled={pipelineMut.isPending || isPaused}
+          title={isPaused ? "Resume jobs first" : "Run NLP pipeline on unprocessed posts"}
+          style={{
+            fontSize: 9, padding: "2px 8px", borderRadius: 3, cursor: isPaused ? "not-allowed" : "pointer",
+            border: "0.5px solid var(--color-purple)",
+            background: "transparent",
+            color: "var(--color-purple)",
+            display: "flex", alignItems: "center", gap: 3,
+            opacity: (pipelineMut.isPending || isPaused) ? 0.4 : 1,
+          }}
+        >
+          <Zap size={9} /> {pipelineMut.isPending ? "Running…" : "Run pipeline"}
+        </button>
+      </div>
+
+      {/* Source rows */}
+      {sources.length === 0 ? (
+        <div style={{ fontSize: 9, color: "var(--color-text-secondary)" }}>No sources linked to this project yet.</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 9 }}>
+          <thead>
+            <tr>
+              {["Source", "Status", "Last run", "Posts/hr", "Errors"].map((h) => (
+                <th key={h} style={{
+                  textAlign: "left", padding: "0 6px 4px 0",
+                  color: "var(--color-text-secondary)", fontWeight: 500,
+                  textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 8,
+                }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sources.map((s) => (
+              <tr key={s.id} style={{ borderTop: "0.5px solid var(--color-border-tertiary)" }}>
+                <td style={{ padding: "5px 6px 5px 0", fontWeight: 500, color: "var(--color-text-primary)" }}>
+                  {s.name}
+                </td>
+                <td style={{ padding: "5px 6px 5px 0" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: STATUS_DOT[s.status] || STATUS_DOT.paused, display: "inline-block" }} />
+                    {s.status}
+                  </span>
+                </td>
+                <td style={{ padding: "5px 6px 5px 0", color: "var(--color-text-secondary)" }}>
+                  {fmtTime(s.last_run)}
+                </td>
+                <td style={{ padding: "5px 6px 5px 0", color: "var(--color-text-secondary)" }}>
+                  {s.posts_per_hour > 0 ? s.posts_per_hour.toFixed(1) : "—"}
+                </td>
+                <td style={{ padding: "5px 0", color: s.error_count > 0 ? "var(--color-red-text)" : "var(--color-text-secondary)" }}>
+                  {s.error_count > 0 ? `⚠ ${s.error_count}` : "0"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -168,6 +347,9 @@ export default function Dashboard() {
 
       {/* Scrollable content */}
       <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+
+        {/* Pipeline status */}
+        <PipelineStatus projectId={projectId} isPaused={project?.is_paused ?? false} />
 
         {/* Metric cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 10 }}>

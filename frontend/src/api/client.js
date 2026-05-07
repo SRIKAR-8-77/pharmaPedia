@@ -12,6 +12,8 @@ export const getProject = (id) => api.get(`/projects/${id}`).then((r) => r.data)
 export const updateProject = (id, data) => api.patch(`/projects/${id}`, data).then((r) => r.data);
 export const deleteProject = (id) => api.delete(`/projects/${id}`);
 export const triggerScrape = (id) => api.post(`/projects/${id}/scrape`).then((r) => r.data);
+export const pauseProject = (id) => api.post(`/projects/${id}/pause`).then((r) => r.data);
+export const resumeProject = (id) => api.post(`/projects/${id}/resume`).then((r) => r.data);
 export const getDashboardStats = (id) => api.get(`/projects/${id}/stats`).then((r) => r.data);
 export const getProjectSources = (id) => api.get(`/projects/${id}/sources`).then((r) => r.data);
 
@@ -50,8 +52,16 @@ export const getPipelineHealth = () => api.get("/admin/pipeline/health").then((r
 export const listPiiQueue = (params) => api.get("/admin/pii-queue", { params }).then((r) => r.data);
 export const reviewPiiItem = (id, data) => api.patch(`/admin/pii-queue/${id}`, data).then((r) => r.data);
 export const discoverSources = (keyword) =>
-  api.post("/admin/discover", { keyword }).then((r) => r.data);
+  api.post("/admin/discover", { keyword }, { timeout: 60000 }).then((r) => r.data);
 export const getAuditLog = (params) => api.get("/admin/audit-log", { params }).then((r) => r.data);
+
+// ─── Global Sources (Reliable Sources Registry) ───────────────────────────────
+export const listGlobalSources = () => api.get("/global-sources").then((r) => r.data);
+export const addConfirmedSource = (data) => api.post("/global-sources/add-confirmed", data).then((r) => r.data);
+export const addCustomSource = (data) => api.post("/global-sources/add-custom", data).then((r) => r.data);
+export const toggleGlobalSource = (id, enabled) => api.post(`/global-sources/${id}/toggle`, null, { params: { enabled } }).then((r) => r.data);
+export const deleteGlobalSource = (id) => api.delete(`/global-sources/${id}`);
+export const probeApi = (data) => api.post("/global-sources/probe-api", data).then((r) => r.data);
 export const listSignalReview = (params) => api.get("/admin/signal-review", { params }).then((r) => r.data);
 export const getSignalReviewCounts = () => api.get("/admin/signal-review/counts").then((r) => r.data);
 

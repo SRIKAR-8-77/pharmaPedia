@@ -45,7 +45,7 @@ Thumbs.db
 *.pt
 *.bin
 *.safetensors
-models/
+/models/
 
 # Claude Code internal settings
-.claude/settings.local.json
+.claude/

@@ -1,20 +1,23 @@
 # ── ML / NLP extras (install on top of requirements.txt) ─────────────────────
 # Run: uv pip install -r requirements-ml.txt
 #
-# Removed from this file (already in requirements.txt):
-#   spacy, presidio-analyzer, presidio-anonymizer, datasketch
+# Already in requirements.txt (do not duplicate):
+#   spacy==3.8.14, presidio-analyzer, presidio-anonymizer, datasketch
 #
-# Removed scispacy + medspacy — they require spacy<3.8 which conflicts
-# with spacy==3.8.14 already installed from requirements.txt.
-# Use the spaCy en_core_sci_sm model directly instead.
+# scispaCy 0.5.5 added — supports spaCy 3.8.x (previous versions required <3.8).
+# en_core_sci_md is the primary biomedical NER model used by step3_entities.py.
+# Install model via Dockerfile (or manually):
+#   pip install https://s3-us-west-2.amazonaws.com/ai2-s3-scispacy/releases/v0.5.5/en_core_sci_md-0.5.5.tar.gz
 
 # Text cleaning
 ftfy==6.2.0
 langdetect==1.0.9
 
 # Transformer-based sentiment + embeddings
+# torch>=2.5 dropped the numpy<2 constraint; thinc wheels require numpy 2.x ABI
 transformers==4.44.2
-torch==2.4.1
+torch==2.5.1
+numpy>=2.0.0,<2.3
 
 # Semantic deduplication + similarity search
 faiss-cpu==1.8.0

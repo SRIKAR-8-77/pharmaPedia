@@ -52,7 +52,8 @@ async def delete_source(source_id: UUID, db: AsyncSession = Depends(get_db)):
     config = await crud.get_source_config(db, source_id)
     if not config:
         raise HTTPException(status_code=404, detail="Source not found")
-    await db.delete(config)
+    db.delete(config)
+    await db.commit()
 
 
 # ─── Source Discovery Agent ───────────────────────────────────────────────────

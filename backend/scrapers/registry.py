@@ -16,6 +16,7 @@ from scrapers.google_news import GoogleNewsScraper
 from scrapers.rss import RSSFeedScraper
 from scrapers.reddit import RedditScraper
 from scrapers.twitter import TwitterScraper
+from scrapers.api import GenericAPIScraper
 
 SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
     # ── Tier 1: Official APIs ─────────────────────────────────────────────────
@@ -25,6 +26,7 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
     # ── Tier 2: Free RSS / no-auth ────────────────────────────────────────────
     "google_news":  GoogleNewsScraper,   # Google News RSS (any keyword)
     "rss":          RSSFeedScraper,      # Generic RSS (custom feeds)
+    "api":          GenericAPIScraper,   # Generic JSON API (config-driven, Gemini-probed)
 
     # ── Tier 3: Social APIs (credentials required) ────────────────────────────
     "reddit":       RedditScraper,       # PRAW API with RSS fallback
@@ -37,6 +39,7 @@ SOURCE_TIERS: dict[str, dict] = {
     "pubmed":       {"tier": 1, "label": "Official API",    "color": "#22c55e", "auth_required": False},
     "google_news":  {"tier": 2, "label": "RSS Feed",        "color": "#3b82f6", "auth_required": False},
     "rss":          {"tier": 2, "label": "RSS Feed",        "color": "#3b82f6", "auth_required": False},
+    "api":          {"tier": 2, "label": "JSON API",        "color": "#8b5cf6", "auth_required": False},
     "reddit":       {"tier": 3, "label": "Social API",      "color": "#f59e0b", "auth_required": True},
     "twitter":      {"tier": 3, "label": "Social API",      "color": "#f59e0b", "auth_required": True},
 }

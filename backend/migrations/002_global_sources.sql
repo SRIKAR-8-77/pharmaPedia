@@ -2,6 +2,13 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Create the sourcelatency enum (SQLAlchemy also creates this via create_all,
+-- but this guard ensures it exists when running migrations manually)
+DO $$ BEGIN
+    CREATE TYPE sourcelatency AS ENUM ('realtime', 'daily', 'weekly');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 CREATE TABLE IF NOT EXISTS global_sources (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     domain VARCHAR(255) NOT NULL UNIQUE,
@@ -30,15 +37,15 @@ CREATE INDEX IF NOT EXISTS ix_project_global_sources_project_id
     ON project_global_sources (project_id);
 
 -- Seed the 4 guaranteed baseline sources
-INSERT INTO global_sources (id, domain, name, source_type, url, feed_url, scraper_config, reliability_tier) VALUES
+INSERT INTO global_sources (id, domain, name, source_type, url, feed_url, scraper_config, reliability_tier, is_active, supports_date_range) VALUES
   (uuid_generate_v4(), 'api.fda.gov', 'FDA FAERS API', 'faers',
-   'https://api.fda.gov/drug/event.json', NULL, '{}', 1),
+   'https://api.fda.gov/drug/event.json', NULL, '{}', 1, TRUE, TRUE),
   (uuid_generate_v4(), 'pubmed.ncbi.nlm.nih.gov', 'PubMed E-Utilities', 'pubmed',
-   'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/', NULL, '{}', 1),
+   'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/', NULL, '{}', 1, TRUE, TRUE),
   (uuid_generate_v4(), 'news.google.com', 'Google News RSS', 'google_news',
    'https://news.google.com/rss/search',
-   'https://news.google.com/rss/search?q={keyword}+adverse+effects&hl=en-US', '{}', 2),
+   'https://news.google.com/rss/search?q={keyword}+adverse+effects&hl=en-US', '{}', 2, TRUE, TRUE),
   (uuid_generate_v4(), 'reddit.com', 'Reddit', 'reddit',
    'https://www.reddit.com',
-   'https://www.reddit.com/search.rss?q={keyword}+side+effects&sort=new', '{}', 2)
+   'https://www.reddit.com/search.rss?q={keyword}+side+effects&sort=new', '{}', 2, TRUE, TRUE)
 ON CONFLICT (domain) DO NOTHING;

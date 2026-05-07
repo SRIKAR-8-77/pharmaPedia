@@ -109,7 +109,7 @@ class FAERSScraper(BaseScraper):
         if since:
             start_dt = since
         else:
-            lookback_days = self.config.get("lookback_days", 90)
+            lookback_days = self.config.get("lookback_days", 540)  # FAERS lags ~6–12 months; need 18mo window
             start_dt = end_dt - timedelta(days=lookback_days)
         start_str = start_dt.strftime("%Y%m%d")
         end_str = end_dt.strftime("%Y%m%d")

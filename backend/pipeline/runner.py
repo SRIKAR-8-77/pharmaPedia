@@ -60,11 +60,16 @@ async def run_pipeline(project_id: UUID, batch_size: int = BATCH_SIZE) -> Pipeli
 
         for post in posts:
             try:
-                enriched = await _process_post(db, post, stats, project_keywords=project_keywords)
-                if enriched:
-                    stats.processed += 1
+                async with db.begin_nested():
+                    enriched = await _process_post(db, post, stats, project_keywords=project_keywords)
+                    if enriched:
+                        stats.processed += 1
             except Exception as e:
-                logger.error(f"Pipeline error for post {post.id}: {e}")
+                err_str = str(e)
+                if "UniqueViolation" in err_str or "unique constraint" in err_str.lower():
+                    pass  # Another worker already processed this post — skip silently
+                else:
+                    logger.error(f"Pipeline error for post {post.id}: {e}")
                 stats.errors += 1
 
         await db.commit()
@@ -113,7 +118,10 @@ async def _process_post(db: AsyncSession, post, stats: PipelineStats, project_ke
     sentiment_result = analyze_sentiment(clean_text, entities=all_entities)
 
     # ── Step 5: Safety signals ────────────────────────────────────────────────
-    signal_result = detect_signals(clean_text, entity_result.drugs, entity_result.symptoms)
+    signal_result = detect_signals(
+        clean_text, entity_result.drugs, entity_result.symptoms,
+        project_keywords=project_keywords or [],
+    )
     if signal_result.has_safety_signal:
         stats.signals_found += 1
         if signal_result.severity == "HIGH":

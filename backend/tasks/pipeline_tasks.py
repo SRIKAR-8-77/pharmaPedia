@@ -56,7 +56,10 @@ def run_pipeline_all_projects():
     async def _run():
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(Project.id).where(Project.is_active == True)
+                select(Project.id).where(
+                    Project.is_active == True,
+                    Project.is_paused == False,
+                )
             )
             project_ids = [str(row[0]) for row in result.all()]
 
@@ -72,7 +75,10 @@ def generate_weekly_reports():
     async def _run():
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(Project.id).where(Project.is_active == True)
+                select(Project.id).where(
+                    Project.is_active == True,
+                    Project.is_paused == False,
+                )
             )
             project_ids = [str(row[0]) for row in result.all()]
 

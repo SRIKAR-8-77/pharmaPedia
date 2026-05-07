@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"
     SECRET_KEY: str = "change_me"
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost", "http://localhost:80"]
 
     class Config:
         env_file = ".env"

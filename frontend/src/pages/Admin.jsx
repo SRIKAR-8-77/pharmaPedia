@@ -5,6 +5,8 @@ import {
   discoverSources, getAuditLog, listSignalReview, getSignalReviewCounts,
   triageSignal, getComplianceReport, getComplianceSettings, updateComplianceSettings,
   runRetentionPurge, gdprErase, getRbacModel,
+  listGlobalSources, addConfirmedSource, addCustomSource, toggleGlobalSource,
+  deleteGlobalSource, probeApi,
 } from "../api/client";
 import api from "../api/client";
 import { Search, RefreshCw, CheckCircle, XCircle, AlertTriangle, Clock, Bot, Download, Trash2, Settings, Users, Lock } from "lucide-react";
@@ -178,135 +180,524 @@ function PipelineHealth() {
 
 // ── Source Discovery ──────────────────────────────────────────────────────────
 
-function SourceDiscovery() {
-  const [keyword, setKeyword] = useState("");
-  const [results, setResults] = useState(null);
-  const [steps, setSteps] = useState([]);
+const ACCESS_TYPE_COLOR = {
+  rss: "var(--color-blue)",
+  api: "var(--color-purple)",
+  reddit: "var(--color-amber)",
+};
 
-  const discover = useMutation({
-    mutationFn: (kw) => {
-      setSteps([
-        { label: "DuckDuckGo search", status: "done" },
-        { label: "Fetching candidate pages", status: "spin" },
-        { label: "Claude relevance scoring", status: "pending" },
-        { label: "Generating YAML config", status: "pending" },
-      ]);
-      return discoverSources(kw);
-    },
-    onSuccess: (data) => {
-      setResults(data);
-      setSteps(prev => prev.map((s) => ({ ...s, status: "done" })));
-    },
-    onError: () => {
-      setSteps((s) => s.map((step) => ({ ...step, status: step.status === "spin" ? "error" : step.status })));
-    },
-  });
-
+function DiscoveredSourceCard({ src, added, onAdd, loading }) {
+  const color = ACCESS_TYPE_COLOR[src.access_type] || "var(--color-border-secondary)";
   return (
-    <div style={{ maxWidth: 600 }}>
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Agentic source discovery</div>
-        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
-          Enter a keyword. The agent searches the web, evaluates candidate sources for relevance, and auto-generates scraper config.
+    <div style={{
+      background: "var(--color-background-primary)",
+      border: `0.5px solid ${color}50`,
+      borderRadius: 6, padding: "10px 12px", marginBottom: 8,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 2 }}>{src.name || src.domain}</div>
+          <a href={src.url} target="_blank" rel="noreferrer" style={{ fontSize: 9, color: "var(--color-blue-text)", wordBreak: "break-all" }}>{src.url}</a>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+          {src.relevance_score && (
+            <span style={{ fontSize: 9, fontWeight: 600, color: "var(--color-green)" }}>{Math.round(src.relevance_score * 100)}% match</span>
+          )}
+          {added ? (
+            <span style={{ fontSize: 9, color: "var(--color-green)", display: "flex", alignItems: "center", gap: 3 }}>
+              <CheckCircle size={10} /> Added to registry
+            </span>
+          ) : (
+            <button
+              onClick={onAdd}
+              disabled={loading}
+              style={{
+                fontSize: 9, padding: "3px 8px", borderRadius: 3, cursor: loading ? "not-allowed" : "pointer",
+                border: `0.5px solid ${color}`, background: `${color}15`, color,
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              {loading ? "Adding…" : "Add to registry"}
+            </button>
+          )}
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+        {src.access_type && (
+          <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 2, background: `${color}20`, color, fontWeight: 600 }}>
+            {src.access_type.toUpperCase()}
+          </span>
+        )}
+        <span style={{
+          fontSize: 9, padding: "1px 5px", borderRadius: 2,
+          background: src.supports_date_range ? "var(--color-green-bg)" : "var(--color-background-secondary)",
+          color: src.supports_date_range ? "var(--color-green-text)" : "var(--color-text-secondary)",
+        }}>
+          {src.supports_date_range ? "⏱ timestamp filter" : "no date filter"}
+        </span>
+        {src.feed_url && (
+          <span style={{ fontSize: 9, color: "var(--color-text-secondary)", wordBreak: "break-all" }}>
+            feed: {src.feed_url.slice(0, 60)}{src.feed_url.length > 60 ? "…" : ""}
+          </span>
+        )}
+      </div>
+
+      {src.reason && (
+        <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginTop: 6, lineHeight: 1.5 }}>{src.reason}</div>
+      )}
+    </div>
+  );
+}
+
+function GlobalSourceRow({ gs, onToggle, onDelete }) {
+  const TIER_C = { 1: "var(--color-green)", 2: "var(--color-blue)", 3: "var(--color-amber)", 4: "var(--color-red)" };
+  const color = TIER_C[gs.reliability_tier] || "var(--color-border-secondary)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 10 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontWeight: 500 }}>{gs.name}</span>
+        <span style={{ color: "var(--color-text-secondary)", marginLeft: 6, fontSize: 9 }}>{gs.domain}</span>
+      </div>
+      <span style={{ fontSize: 9, padding: "1px 4px", borderRadius: 2, background: `${color}20`, color, fontWeight: 600, flexShrink: 0 }}>T{gs.reliability_tier}</span>
+      <span style={{ fontSize: 9, flexShrink: 0, color: gs.supports_date_range ? "var(--color-green)" : "var(--color-text-secondary)" }}>
+        {gs.supports_date_range ? "⏱ timestamp" : "no filter"}
+      </span>
+      <span style={{ fontSize: 9, color: "var(--color-text-secondary)", flexShrink: 0 }}>{gs.total_posts_pulled ?? 0} posts</span>
+      <button
+        onClick={() => onToggle(!gs.is_active)}
+        style={{
+          fontSize: 9, padding: "2px 6px", borderRadius: 3, cursor: "pointer", flexShrink: 0,
+          border: `0.5px solid ${gs.is_active ? "var(--color-green)" : "var(--color-border-secondary)"}`,
+          background: "transparent",
+          color: gs.is_active ? "var(--color-green)" : "var(--color-text-secondary)",
+        }}
+      >
+        {gs.is_active ? "Active" : "Disabled"}
+      </button>
+      <button
+        onClick={() => {
+          if (window.confirm(`Remove "${gs.name}" from the registry? This will unlink it from all projects.`)) {
+            onDelete(gs.id);
+          }
+        }}
+        title="Remove source"
+        style={{
+          fontSize: 9, padding: "2px 5px", borderRadius: 3, cursor: "pointer", flexShrink: 0,
+          border: "0.5px solid var(--color-border-tertiary)", background: "transparent",
+          color: "var(--color-red-text)", lineHeight: 1,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function SourceDiscovery() {
+  const [keyword, setKeyword] = useState("");
+  const [results, setResults] = useState(null);
+  const [addedDomains, setAddedDomains] = useState(new Set());
+  const [showManual, setShowManual] = useState(false);
+  const [showRegistry, setShowRegistry] = useState(true);
+  const [manualForm, setManualForm] = useState({
+    url: "", name: "", source_type: "rss", api_key: "", supports_date_range: false,
+  });
+  const [probedConfig, setProbedConfig] = useState(null); // detected API field mapping
+
+  const { data: globalSources = [], refetch: refetchGlobal } = useQuery({
+    queryKey: ["global-sources"],
+    queryFn: listGlobalSources,
+  });
+
+  const discoverMut = useMutation({
+    mutationFn: discoverSources,
+    onSuccess: (data) => setResults(data),
+  });
+
+  const addConfirmedMut = useMutation({
+    mutationFn: (src) => addConfirmedSource({
+      name: src.name || src.domain,
+      domain: src.domain,
+      source_type: src.access_type || "rss",
+      url: src.url,
+      feed_url: src.feed_url || null,
+      supports_date_range: src.supports_date_range || false,
+    }),
+    onSuccess: (saved) => {
+      setAddedDomains((prev) => new Set([...prev, saved.domain]));
+      refetchGlobal();
+    },
+  });
+
+  const probeMut = useMutation({
+    mutationFn: () => probeApi({ url: manualForm.url, api_key: manualForm.api_key || undefined }),
+    onSuccess: (cfg) => {
+      setProbedConfig(cfg);
+      if (cfg.supports_date_range !== undefined) {
+        setManualForm((f) => ({ ...f, supports_date_range: cfg.supports_date_range }));
+      }
+    },
+  });
+
+  const addCustomMut = useMutation({
+    mutationFn: () => addCustomSource({
+      url: manualForm.url,
+      name: manualForm.name,
+      source_type: manualForm.source_type,
+      api_key: manualForm.api_key || undefined,
+      scraper_config: manualForm.source_type === "api" ? probedConfig : undefined,
+      supports_date_range: manualForm.supports_date_range,
+    }),
+    onSuccess: () => {
+      refetchGlobal();
+      setManualForm({ url: "", name: "", source_type: "rss", api_key: "", supports_date_range: false });
+      setProbedConfig(null);
+      setShowManual(false);
+    },
+  });
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, enabled }) => toggleGlobalSource(id, enabled),
+    onSuccess: () => refetchGlobal(),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id) => deleteGlobalSource(id),
+    onSuccess: () => refetchGlobal(),
+  });
+
+  const available = results?.available || [];
+  const alreadyTracked = results?.already_tracked || [];
+  const suggestions = results?.suggestions || [];
+  const hasNewSource = available.length > 0;
+
+  const inputStyle = {
+    background: "var(--color-background-secondary)",
+    border: "0.5px solid var(--color-border-tertiary)",
+    borderRadius: 4, padding: "4px 8px",
+    fontSize: 10, color: "var(--color-text-primary)", outline: "none",
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Source discovery</div>
+        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+          AI searches the web for new pharma data sources. Prototype: evaluates 1 extra source per run.
+          Confirmed sources persist across all projects.
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: 5, padding: "6px 10px" }}>
           <Search size={12} color="var(--color-text-secondary)" />
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && keyword.trim() && discover.mutate(keyword.trim())}
+            onKeyDown={(e) => e.key === "Enter" && keyword.trim() && discoverMut.mutate(keyword.trim())}
             placeholder="e.g. ozempic side effects forum…"
             style={{ flex: 1, background: "none", border: "none", outline: "none", fontSize: 11, color: "var(--color-text-primary)" }}
           />
         </div>
         <button
-          onClick={() => keyword.trim() && discover.mutate(keyword.trim())}
-          disabled={!keyword.trim() || discover.isPending}
+          onClick={() => keyword.trim() && discoverMut.mutate(keyword.trim())}
+          disabled={!keyword.trim() || discoverMut.isPending}
           style={{
             padding: "6px 14px", borderRadius: 5, fontSize: 11, fontWeight: 500,
             border: "0.5px solid var(--color-border-secondary)",
             background: "var(--color-background-secondary)",
             color: "var(--color-text-primary)", cursor: "pointer",
             display: "flex", alignItems: "center", gap: 5,
-            opacity: !keyword.trim() || discover.isPending ? 0.6 : 1,
+            opacity: !keyword.trim() || discoverMut.isPending ? 0.6 : 1,
           }}
         >
-          <Bot size={12} /> {discover.isPending ? "Discovering…" : "Discover →"}
+          <Bot size={12} /> {discoverMut.isPending ? "Searching…" : "Discover →"}
         </button>
       </div>
 
-      {/* Agent steps */}
-      {steps.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-          {steps.map((step, i) => (
+      {/* Loading state — discovery takes 15–30s, show progress so user knows it's working */}
+      {discoverMut.isPending && (
+        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginBottom: 14, padding: "10px 12px", background: "var(--color-background-secondary)", borderRadius: 5, display: "flex", alignItems: "center", gap: 8 }}>
+          <RefreshCw size={11} style={{ animation: "spin 1.2s linear infinite" }} />
+          <span>Searching the web and evaluating sources with AI — this takes 15–30 seconds…</span>
+        </div>
+      )}
+
+      {/* Error state */}
+      {discoverMut.isError && (
+        <div style={{ fontSize: 10, color: "var(--color-red-text)", marginBottom: 14, padding: "8px 12px", background: "var(--color-background-secondary)", borderRadius: 5, border: "0.5px solid var(--color-red-text)" }}>
+          Discovery failed: {discoverMut.error?.response?.data?.detail || discoverMut.error?.message || "Unknown error — check the backend logs."}
+        </div>
+      )}
+
+      {/* Alert: new source found */}
+      {hasNewSource && (
+        <div style={{
+          background: "var(--color-green-bg)", border: "0.5px solid var(--color-green)",
+          borderRadius: 6, padding: "10px 14px", marginBottom: 14,
+          display: "flex", gap: 8, alignItems: "flex-start",
+        }}>
+          <CheckCircle size={14} color="var(--color-green)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--color-green-text)", marginBottom: 2 }}>
+              New source found — {available[0].name || available[0].domain}
+            </div>
+            <div style={{ fontSize: 9, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
+              Prototype mode: 1 source surfaced per search. Add it to the reliable sources registry to activate it across all projects.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Available sources */}
+      {available.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, fontWeight: 500, marginBottom: 8, color: "var(--color-text-primary)" }}>
+            Available ({available.length})
+          </div>
+          {available.map((src, i) => (
+            <DiscoveredSourceCard
+              key={i}
+              src={src}
+              added={addedDomains.has(src.domain)}
+              loading={addConfirmedMut.isPending}
+              onAdd={() => addConfirmedMut.mutate(src)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Already tracked */}
+      {alreadyTracked.length > 0 && (
+        <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 10, padding: "6px 10px", background: "var(--color-background-secondary)", borderRadius: 4 }}>
+          Already in registry: {alreadyTracked.map((t) => t.domain).join(", ")}
+        </div>
+      )}
+
+      {/* Suggestions (relevant but no free access) */}
+      {suggestions.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, fontWeight: 500, marginBottom: 6, color: "var(--color-text-secondary)" }}>
+            Relevant but no free access ({suggestions.length})
+          </div>
+          {suggestions.map((src, i) => (
             <div key={i} style={{
-              display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
-              background: step.status === "spin" ? "var(--color-background-primary)" : "var(--color-background-secondary)",
-              border: "0.5px solid " + (step.status === "spin" ? "var(--color-border-secondary)" : "var(--color-border-tertiary)"),
-              borderRadius: 5, fontSize: 10,
+              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+              padding: "6px 0", borderBottom: "0.5px solid var(--color-border-tertiary)", fontSize: 10,
             }}>
-              <div style={{
-                width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: step.status === "done" ? "var(--color-green)" : step.status === "error" ? "var(--color-red)" : "var(--color-border-secondary)",
-                ...(step.status === "spin" ? { border: "1.5px solid var(--color-purple)", background: "transparent", animation: "spin .7s linear infinite" } : {}),
-              }}>
-                {step.status === "done" && <CheckCircle size={10} color="#fff" />}
-                {step.status === "error" && <XCircle size={10} color="#fff" />}
+              <div>
+                <a href={src.url} target="_blank" rel="noreferrer" style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                  {src.name || src.domain}
+                </a>
+                <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginTop: 2 }}>{src.reason}</div>
               </div>
-              <span style={{ color: step.status === "pending" ? "var(--color-text-secondary)" : "var(--color-text-primary)" }}>
-                {step.label}
+              <span style={{ fontSize: 9, color: "var(--color-text-secondary)", flexShrink: 0, marginLeft: 8 }}>
+                {Math.round((src.relevance_score || 0) * 100)}%
               </span>
             </div>
           ))}
         </div>
       )}
 
-      {results && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 8 }}>
-            Discovered {results.discovered_sources?.length || 0} sources for "{results.keyword}"
-          </div>
-          {results.discovered_sources?.map((src, i) => (
-            <div key={i} style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6, padding: "10px 12px", marginBottom: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 500 }}>{src.name || src.url}</div>
-                  <a href={src.url} target="_blank" rel="noreferrer" style={{ fontSize: 9, color: "var(--color-blue-text)" }}>{src.url}</a>
+      {/* No results state */}
+      {results && !hasNewSource && suggestions.length === 0 && alreadyTracked.length === 0 && (
+        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", padding: "10px 0" }}>
+          No new sources found for "{results.keyword}". Try a more specific keyword.
+        </div>
+      )}
+
+      {/* Divider */}
+      <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", margin: "16px 0" }} />
+
+      {/* Manual add */}
+      <div style={{ marginBottom: 16 }}>
+        <button
+          onClick={() => setShowManual(!showManual)}
+          style={{
+            fontSize: 10, padding: "4px 10px", borderRadius: 4, cursor: "pointer",
+            border: "0.5px solid var(--color-border-secondary)",
+            background: "transparent", color: "var(--color-text-secondary)",
+            display: "flex", alignItems: "center", gap: 5,
+          }}
+        >
+          + Add source manually (API key / feed URL)
+        </button>
+
+        {showManual && (
+          <div style={{ marginTop: 10, padding: "12px", background: "var(--color-background-secondary)", borderRadius: 6, border: "0.5px solid var(--color-border-tertiary)" }}>
+            {/* Type tabs */}
+            <div style={{ display: "flex", gap: 2, marginBottom: 12 }}>
+              {["rss", "api"].map((t) => (
+                <button key={t} onClick={() => { setManualForm((f) => ({ ...f, source_type: t })); setProbedConfig(null); }} style={{
+                  fontSize: 10, padding: "3px 10px", borderRadius: 3, cursor: "pointer",
+                  border: `0.5px solid ${manualForm.source_type === t ? "var(--color-border-primary)" : "var(--color-border-tertiary)"}`,
+                  background: manualForm.source_type === t ? "var(--color-background-primary)" : "transparent",
+                  color: manualForm.source_type === t ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                  fontWeight: manualForm.source_type === t ? 500 : 400,
+                }}>
+                  {t === "rss" ? "RSS Feed" : "JSON API"}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 3 }}>
+                  {manualForm.source_type === "rss" ? "Feed URL *" : "API fetch URL * (use {keyword}, {limit}, {since_iso})"}
                 </div>
-                {src.relevance_score && (
-                  <div style={{ fontSize: 9, color: "var(--color-green)", fontWeight: 600 }}>
-                    {Math.round(src.relevance_score * 100)}% relevant
+                <input
+                  value={manualForm.url}
+                  onChange={(e) => { setManualForm((f) => ({ ...f, url: e.target.value })); setProbedConfig(null); }}
+                  placeholder={manualForm.source_type === "rss" ? "https://example.com/rss?q={keyword}" : "https://api.example.com/posts?q={keyword}&limit={limit}"}
+                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 3 }}>Display name *</div>
+                <input
+                  value={manualForm.name}
+                  onChange={(e) => setManualForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Patient Forum — Example"
+                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+              {manualForm.source_type === "api" && (
+                <div style={{ gridColumn: "span 2" }}>
+                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 3 }}>API key (optional — Bearer token)</div>
+                  <input
+                    value={manualForm.api_key}
+                    onChange={(e) => { setManualForm((f) => ({ ...f, api_key: e.target.value })); setProbedConfig(null); }}
+                    placeholder="sk-…"
+                    type="password"
+                    style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* API: auto-detect button + detected fields */}
+            {manualForm.source_type === "api" && (
+              <div style={{ marginBottom: 10 }}>
+                <button
+                  onClick={() => probeMut.mutate()}
+                  disabled={!manualForm.url || probeMut.isPending}
+                  style={{
+                    fontSize: 10, padding: "4px 10px", borderRadius: 4, cursor: "pointer",
+                    border: "0.5px solid var(--color-blue)", background: "transparent",
+                    color: "var(--color-blue)", opacity: !manualForm.url ? 0.5 : 1,
+                  }}
+                >
+                  {probeMut.isPending ? "Detecting fields…" : "⚡ Auto-detect response fields"}
+                </button>
+                {probeMut.isError && (
+                  <div style={{ fontSize: 9, color: "var(--color-red-text)", marginTop: 4 }}>
+                    {probeMut.error?.response?.data?.detail || "Could not reach the API URL."}
+                  </div>
+                )}
+                {probedConfig && (
+                  <div style={{ marginTop: 8, padding: "8px 10px", background: "var(--color-background-primary)", borderRadius: 4, border: "0.5px solid var(--color-border-tertiary)" }}>
+                    <div style={{ fontSize: 9, fontWeight: 500, marginBottom: 6, color: "var(--color-green-text)" }}>
+                      Fields detected — confirm before adding:
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {["items_path", "text_field", "title_field", "author_field", "url_field", "id_field", "date_field"].map((key) => (
+                        probedConfig[key] ? (
+                          <span key={key} style={{
+                            fontSize: 9, padding: "2px 6px", borderRadius: 3,
+                            background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-secondary)",
+                            color: "var(--color-text-secondary)",
+                          }}>
+                            <span style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>{key.replace("_field", "").replace("_path", " path")}</span>: {probedConfig[key]}
+                          </span>
+                        ) : null
+                      ))}
+                    </div>
+                    {probedConfig._note && (
+                      <div style={{ fontSize: 9, color: "var(--color-amber)", marginTop: 6 }}>{probedConfig._note}</div>
+                    )}
                   </div>
                 )}
               </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-                {src.source_type && (
-                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 2, background: "var(--color-blue-bg)", color: "var(--color-blue-text)", fontWeight: 600 }}>{src.source_type}</span>
-                )}
-                {!src.auth_required && (
-                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 2, background: "var(--color-green-bg)", color: "var(--color-green-text)" }}>No auth</span>
-                )}
-              </div>
-              {src.recommended_integration && (
-                <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginBottom: 6, lineHeight: 1.5 }}>{src.recommended_integration}</div>
-              )}
-              {(src.yaml_config || src.scraper_config_yaml) && (
-                <pre style={{
-                  background: "var(--color-background-secondary)", borderRadius: 4, padding: "8px 10px",
-                  fontSize: 9, color: "var(--color-text-secondary)", overflow: "auto", maxHeight: 140, lineHeight: 1.6,
-                  fontFamily: "var(--font-mono)",
-                }}>
-                  {src.yaml_config || src.scraper_config_yaml}
-                </pre>
-              )}
+            )}
+
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--color-text-secondary)", marginBottom: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={manualForm.supports_date_range}
+                onChange={(e) => setManualForm((f) => ({ ...f, supports_date_range: e.target.checked }))}
+              />
+              Source supports server-side date range filtering (e.g. ?since=, ?from=, ?start_date=)
+            </label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                onClick={() => addCustomMut.mutate()}
+                disabled={!manualForm.url || !manualForm.name || addCustomMut.isPending || (manualForm.source_type === "api" && !probedConfig)}
+                style={{
+                  fontSize: 10, padding: "4px 12px", borderRadius: 4, cursor: "pointer",
+                  border: "0.5px solid var(--color-border-primary)",
+                  background: "var(--color-background-primary)",
+                  color: "var(--color-text-primary)",
+                  opacity: (!manualForm.url || !manualForm.name || (manualForm.source_type === "api" && !probedConfig)) ? 0.5 : 1,
+                }}
+              >
+                {addCustomMut.isPending ? "Adding…" : "Add to registry"}
+              </button>
+              <button
+                onClick={() => { setShowManual(false); setProbedConfig(null); }}
+                style={{ fontSize: 10, padding: "4px 10px", borderRadius: 4, cursor: "pointer", border: "0.5px solid var(--color-border-tertiary)", background: "transparent", color: "var(--color-text-secondary)" }}
+              >
+                Cancel
+              </button>
             </div>
-          ))}
+            {manualForm.source_type === "api" && !probedConfig && manualForm.url && (
+              <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginTop: 6 }}>
+                Click "Auto-detect response fields" first so the scraper knows how to parse the API response.
+              </div>
+            )}
+            {addCustomMut.isError && (
+              <div style={{ fontSize: 9, color: "var(--color-red-text)", marginTop: 6 }}>
+                {addCustomMut.error?.response?.data?.detail || "Failed to add source — check the URL and try again."}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Reliable sources registry */}
+      <div>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, cursor: "pointer" }}
+          onClick={() => setShowRegistry(!showRegistry)}
+        >
+          <div style={{ fontSize: 11, fontWeight: 500 }}>
+            Reliable sources registry
+            <span style={{ fontSize: 9, color: "var(--color-text-secondary)", marginLeft: 6, fontWeight: 400 }}>
+              {globalSources.length} sources — available across all projects
+            </span>
+          </div>
+          <span style={{ fontSize: 9, color: "var(--color-text-secondary)" }}>{showRegistry ? "▲" : "▼"}</span>
         </div>
-      )}
+
+        {showRegistry && (
+          globalSources.length === 0 ? (
+            <div style={{ fontSize: 9, color: "var(--color-text-secondary)", padding: "10px 0" }}>No sources in registry yet.</div>
+          ) : (
+            <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6, padding: "0 10px" }}>
+              {globalSources.map((gs) => (
+                <GlobalSourceRow
+                  key={gs.id}
+                  gs={gs}
+                  onToggle={(enabled) => toggleMut.mutate({ id: gs.id, enabled })}
+                  onDelete={(id) => deleteMut.mutate(id)}
+                />
+              ))}
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 }

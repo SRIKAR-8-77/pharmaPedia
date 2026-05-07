@@ -1,24 +1,27 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createProject } from "../api/client";
-import { X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createProject, listGlobalSources, discoverSources, addConfirmedSource } from "../api/client";
+import { X, Search, Bot, CheckCircle, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 
-const SOURCES = [
-  { id: "reddit",  label: "Reddit",         desc: "PRAW + RSS · subreddit stream",   status: "green" },
-  { id: "twitter", label: "Twitter / X",     desc: "twitterapi.io · keyword search",  status: "green" },
-  { id: "rss",     label: "HealthUnlocked",  desc: "Scrapy spider · auto-config",      status: "amber" },
-  { id: "forum",   label: "Drugs.com",       desc: "RSS feed · review comments",       status: "amber" },
-];
+const SOURCE_DESCS = {
+  faers:       "FDA adverse event reports · official API",
+  pubmed:      "Peer-reviewed research abstracts · NCBI",
+  google_news: "News articles · Google News RSS",
+  reddit:      "Patient discussions · RSS + PRAW",
+  rss:         "Custom RSS feed",
+  api:         "Custom JSON API",
+  twitter:     "Twitter/X · twitterapi.io",
+};
 
-const LATENCIES = [
-  { id: "realtime", label: "Real-time", desc: "Every 60s" },
-  { id: "daily",    label: "Daily",     desc: "Once per day" },
-  { id: "weekly",   label: "Weekly",    desc: "Once per week" },
-];
+const SOURCE_STATUS = {
+  faers: "green", pubmed: "green", google_news: "green",
+  rss: "green", api: "green", reddit: "green", twitter: "amber",
+};
 
-const STEPS = ["Name", "Keywords", "Sources", "Latency", "Alerts", "Launch"];
+
+const STEPS = ["Name", "Keywords", "Sources", "Date Range", "Alerts", "Launch"];
 
 const DOT_COLORS = { green: "var(--color-green)", amber: "var(--color-amber)", red: "var(--color-red)" };
 
@@ -171,18 +174,96 @@ function StepKeywords({ keywords, setKeywords }) {
   );
 }
 
-function StepSources({ sources, setSources }) {
+const DISCOVERY_STEPS = [
+  "Searching the web for patient communities and clinical data sources…",
+  "Probing candidate URLs for RSS feeds and public APIs…",
+  "Asking AI to assess relevance and timestamp support…",
+  "Ranking results…",
+];
+
+function StepSources({ sources, setSources, keywords }) {
+  const qc = useQueryClient();
+  const { data: globalSources = [], isLoading } = useQuery({
+    queryKey: ["global-sources"],
+    queryFn: listGlobalSources,
+  });
+
+  // Pre-select all sources once loaded
+  useEffect(() => {
+    if (globalSources.length > 0 && sources.length === 0) {
+      setSources(globalSources.map((gs) => gs.id));
+    }
+  }, [globalSources]);
+
   const toggle = (id) =>
     setSources((prev) => prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]);
+
+  // Discovery state
+  const [discoverKw, setDiscoverKw] = useState("");
+  const [showDiscover, setShowDiscover] = useState(false);
+  const [discoverResults, setDiscoverResults] = useState(null);
+  const [addedDomains, setAddedDomains] = useState(new Set());
+  const [progressStep, setProgressStep] = useState(0);
+  const progressRef = useRef(null);
+
+  const discoverMut = useMutation({
+    mutationFn: discoverSources,
+    onSuccess: (data) => {
+      clearInterval(progressRef.current);
+      setDiscoverResults(data);
+    },
+    onError: () => clearInterval(progressRef.current),
+  });
+
+  const addMut = useMutation({
+    mutationFn: (src) => addConfirmedSource({
+      name: src.name || src.domain,
+      domain: src.domain,
+      source_type: src.access_type || "rss",
+      url: src.url,
+      feed_url: src.feed_url || null,
+      supports_date_range: src.supports_date_range || false,
+    }),
+    onSuccess: (saved) => {
+      setAddedDomains((prev) => new Set([...prev, saved.domain]));
+      qc.invalidateQueries({ queryKey: ["global-sources"] });
+      // auto-select the new source
+      setSources((prev) => prev.includes(saved.id) ? prev : [...prev, saved.id]);
+      toast.success(`"${saved.name}" added to registry`);
+    },
+    onError: (err) => toast.error(err?.response?.data?.detail || "Failed to add source"),
+  });
+
+  const startDiscover = () => {
+    const kw = discoverKw.trim() || keywords[0] || "";
+    if (!kw) return;
+    setDiscoverResults(null);
+    setProgressStep(0);
+    let step = 0;
+    progressRef.current = setInterval(() => {
+      step = Math.min(step + 1, DISCOVERY_STEPS.length - 1);
+      setProgressStep(step);
+    }, 5000);
+    discoverMut.mutate(kw);
+  };
+
+  const available = discoverResults?.available || [];
+  const suggestions = discoverResults?.suggestions || [];
+  const alreadyTracked = discoverResults?.already_tracked || [];
 
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 12 }}>Select data sources</div>
-      {SOURCES.map((s) => {
-        const on = sources.includes(s.id);
+      {isLoading && (
+        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", padding: "10px 0" }}>Loading sources…</div>
+      )}
+      {globalSources.map((gs) => {
+        const on = sources.includes(gs.id);
+        const status = SOURCE_STATUS[gs.source_type] || "green";
+        const desc = SOURCE_DESCS[gs.source_type] || gs.source_type;
         return (
           <div
-            key={s.id}
+            key={gs.id}
             style={{
               display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
               border: "0.5px solid " + (on ? "var(--color-border-primary)" : "var(--color-border-tertiary)"),
@@ -190,63 +271,260 @@ function StepSources({ sources, setSources }) {
               background: on ? "var(--color-background-secondary)" : "var(--color-background-primary)",
               transition: "all 0.12s",
             }}
-            onClick={() => toggle(s.id)}
+            onClick={() => toggle(gs.id)}
           >
-            <div style={{
-              width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-              background: DOT_COLORS[s.status],
-            }} />
+            <div style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: DOT_COLORS[status] }} />
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-primary)" }}>{s.label}</div>
-              <div style={{ fontSize: 9, color: "var(--color-text-secondary)" }}>{s.desc}</div>
+              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-primary)" }}>{gs.name}</div>
+              <div style={{ fontSize: 9, color: "var(--color-text-secondary)" }}>{desc}</div>
             </div>
-            <Toggle on={on} onClick={(e) => { e.stopPropagation(); toggle(s.id); }} />
+            <Toggle on={on} onClick={(e) => { e.stopPropagation(); toggle(gs.id); }} />
           </div>
         );
       })}
-      <div style={{ marginTop: 8, fontSize: 10, color: "var(--color-text-secondary)" }}>
-        Don't see your source?{" "}
-        <span style={{ color: "var(--color-purple)", cursor: "pointer" }}>
-          Discover new sources via AI agent →
-        </span>
+
+      {/* Discover panel */}
+      <div style={{ marginTop: 10, borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 10 }}>
+        {!showDiscover ? (
+          <button
+            onClick={() => { setShowDiscover(true); setDiscoverKw(keywords[0] || ""); }}
+            style={{
+              fontSize: 10, padding: "4px 10px", borderRadius: 4, cursor: "pointer",
+              border: "0.5px solid var(--color-border-secondary)", background: "transparent",
+              color: "var(--color-text-secondary)", display: "flex", alignItems: "center", gap: 5,
+            }}
+          >
+            <Bot size={11} /> Find more sources with AI →
+          </button>
+        ) : (
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 500, marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+              <span>AI source discovery</span>
+              <span
+                style={{ fontSize: 9, color: "var(--color-text-secondary)", cursor: "pointer" }}
+                onClick={() => { setShowDiscover(false); setDiscoverResults(null); }}
+              >
+                ✕ close
+              </span>
+            </div>
+
+            {/* Search bar */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <input
+                value={discoverKw}
+                onChange={(e) => setDiscoverKw(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && startDiscover()}
+                placeholder="Keyword to search (e.g. ozempic side effects)"
+                style={{
+                  flex: 1, padding: "4px 8px",
+                  background: "var(--color-background-secondary)",
+                  border: "0.5px solid var(--color-border-tertiary)",
+                  borderRadius: 4, fontSize: 10,
+                  color: "var(--color-text-primary)", outline: "none",
+                }}
+              />
+              <button
+                onClick={startDiscover}
+                disabled={!discoverKw.trim() || discoverMut.isPending}
+                style={{
+                  padding: "4px 10px", borderRadius: 4, fontSize: 10, cursor: "pointer",
+                  border: "0.5px solid var(--color-border-secondary)",
+                  background: "var(--color-background-secondary)",
+                  color: "var(--color-text-primary)",
+                  opacity: !discoverKw.trim() || discoverMut.isPending ? 0.5 : 1,
+                  display: "flex", alignItems: "center", gap: 4,
+                }}
+              >
+                <Search size={10} /> {discoverMut.isPending ? "Searching…" : "Search"}
+              </button>
+            </div>
+
+            {/* Progress log */}
+            {discoverMut.isPending && (
+              <div style={{
+                padding: "10px 12px", background: "var(--color-background-secondary)",
+                borderRadius: 5, marginBottom: 8,
+              }}>
+                {DISCOVERY_STEPS.map((msg, i) => (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", gap: 7,
+                    fontSize: 9, lineHeight: 1.8,
+                    color: i <= progressStep ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                    opacity: i <= progressStep ? 1 : 0.4,
+                  }}>
+                    {i < progressStep ? (
+                      <CheckCircle size={9} color="var(--color-green)" />
+                    ) : i === progressStep ? (
+                      <RefreshCw size={9} style={{ animation: "spin 1.2s linear infinite", color: "var(--color-text-secondary)" }} />
+                    ) : (
+                      <span style={{ width: 9, display: "inline-block" }}>·</span>
+                    )}
+                    {msg}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Error */}
+            {discoverMut.isError && (
+              <div style={{ fontSize: 9, color: "var(--color-red-text)", marginBottom: 8, padding: "6px 10px", background: "var(--color-background-secondary)", borderRadius: 4 }}>
+                Discovery failed: {discoverMut.error?.response?.data?.detail || discoverMut.error?.message || "Check backend logs."}
+              </div>
+            )}
+
+            {/* Results */}
+            {discoverResults && (
+              <div>
+                {available.length > 0 && available.map((src, i) => (
+                  <div key={i} style={{
+                    padding: "8px 10px", borderRadius: 5, marginBottom: 6,
+                    border: `0.5px solid var(--color-green)30`,
+                    background: "var(--color-background-secondary)",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, fontWeight: 500 }}>{src.name || src.domain}</div>
+                        <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginTop: 2 }}>
+                          {src.access_type?.toUpperCase()} · {src.supports_date_range ? "⏱ supports date filter" : "no date filter"}
+                        </div>
+                        {src.reason && <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginTop: 2, lineHeight: 1.4 }}>{src.reason}</div>}
+                      </div>
+                      {addedDomains.has(src.domain) ? (
+                        <span style={{ fontSize: 9, color: "var(--color-green)", display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                          <CheckCircle size={9} /> Added
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => addMut.mutate(src)}
+                          disabled={addMut.isPending}
+                          style={{
+                            fontSize: 9, padding: "3px 8px", borderRadius: 3, cursor: "pointer", flexShrink: 0,
+                            border: "0.5px solid var(--color-green)", background: "var(--color-green-bg)",
+                            color: "var(--color-green-text)", opacity: addMut.isPending ? 0.6 : 1,
+                          }}
+                        >
+                          + Add to registry
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {suggestions.length > 0 && (
+                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 500 }}>Relevant but no free access: </span>
+                    {suggestions.map((s) => s.name || s.domain).join(", ")}
+                  </div>
+                )}
+
+                {alreadyTracked.length > 0 && (
+                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 500 }}>Already in registry: </span>
+                    {alreadyTracked.map((t) => t.domain).join(", ")}
+                  </div>
+                )}
+
+                {available.length === 0 && suggestions.length === 0 && (
+                  <div style={{ fontSize: 9, color: "var(--color-text-secondary)" }}>
+                    No new accessible sources found. Try a more specific keyword.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function StepLatency({ sources, latency, setLatency }) {
+function StepDateRange({ dateFrom, setDateFrom, dateTo, setDateTo, mode, setMode }) {
+  const inputStyle = {
+    width: "100%", padding: "5px 8px", boxSizing: "border-box",
+    background: "var(--color-background-secondary)",
+    border: "0.5px solid var(--color-border-tertiary)",
+    borderRadius: 4, fontSize: 11, color: "var(--color-text-primary)", outline: "none",
+  };
+  const today = new Date().toISOString().split("T")[0];
+
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 12 }}>Set polling frequency</div>
-      {sources.length === 0 && (
-        <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>No sources selected.</div>
-      )}
-      {sources.map((src) => (
-        <div key={src} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 10, fontWeight: 500, marginBottom: 6, textTransform: "capitalize" }}>{src}</div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {LATENCIES.map((l) => {
-              const active = (latency[src] || "daily") === l.id;
-              return (
-                <button
-                  key={l.id}
-                  onClick={() => setLatency((prev) => ({ ...prev, [src]: l.id }))}
-                  style={{
-                    flex: 1, padding: "6px 8px", borderRadius: 5,
-                    border: "0.5px solid " + (active ? "var(--color-border-primary)" : "var(--color-border-tertiary)"),
-                    background: active ? "var(--color-background-secondary)" : "var(--color-background-primary)",
-                    color: active ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                    fontSize: 10, cursor: "pointer",
-                  }}
-                >
-                  <div style={{ fontWeight: 500 }}>{l.label}</div>
-                  <div style={{ fontSize: 9, opacity: 0.8 }}>{l.desc}</div>
-                </button>
-              );
-            })}
+      <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Data collection window</div>
+      <div style={{ fontSize: 10, color: "var(--color-text-secondary)", marginBottom: 14, lineHeight: 1.6 }}>
+        Choose how far back to pull historical data and whether to keep monitoring live.
+      </div>
+
+      {/* Mode selection */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {[
+          { id: "live",       label: "Live",          desc: "Start from now, monitor continuously" },
+          { id: "historical", label: "Historical",     desc: "Pull past data, then go live" },
+          { id: "fixed",      label: "Fixed range",   desc: "Specific start + end date only" },
+        ].map((m) => (
+          <div
+            key={m.id}
+            onClick={() => setMode(m.id)}
+            style={{
+              flex: 1, padding: "8px 10px", borderRadius: 5, cursor: "pointer",
+              border: `0.5px solid ${mode === m.id ? "var(--color-border-primary)" : "var(--color-border-tertiary)"}`,
+              background: mode === m.id ? "var(--color-background-secondary)" : "var(--color-background-primary)",
+              transition: "all 0.12s",
+            }}
+          >
+            <div style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 2 }}>{m.label}</div>
+            <div style={{ fontSize: 9, color: "var(--color-text-secondary)", lineHeight: 1.4 }}>{m.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Date inputs */}
+      {(mode === "historical" || mode === "fixed") && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px" }}>
+          <div>
+            <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 3 }}>
+              Start date *
+            </div>
+            <input
+              type="date"
+              max={today}
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginBottom: 3 }}>
+              {mode === "fixed" ? "End date *" : "End date (blank = keep live)"}
+            </div>
+            <input
+              type="date"
+              min={dateFrom || undefined}
+              max={mode === "fixed" ? today : undefined}
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={inputStyle}
+            />
           </div>
         </div>
-      ))}
+      )}
+
+      {mode === "live" && (
+        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", padding: "8px 10px", background: "var(--color-background-secondary)", borderRadius: 4 }}>
+          Monitoring starts immediately. Sources will be polled on their scheduled cadence (Reddit: real-time, news: daily, PubMed: weekly, FAERS: daily).
+        </div>
+      )}
+
+      {mode === "historical" && (
+        <div style={{ fontSize: 9, color: "var(--color-text-secondary)", marginTop: 8, lineHeight: 1.5 }}>
+          A batch scrape will fetch all data from the start date. After it finishes, live monitoring continues automatically.
+        </div>
+      )}
+
+      {mode === "fixed" && (
+        <div style={{ fontSize: 9, color: "var(--color-amber)", marginTop: 8, lineHeight: 1.5 }}>
+          Fixed range: only the specified window will be scraped. No live monitoring after the end date.
+        </div>
+      )}
     </div>
   );
 }
@@ -265,13 +543,15 @@ function StepAlerts() {
 }
 
 function StepLaunch({ name, keywords, sources }) {
+  const { data: globalSources = [] } = useQuery({ queryKey: ["global-sources"], queryFn: listGlobalSources });
+  const selectedNames = globalSources.filter((gs) => sources.includes(gs.id)).map((gs) => gs.name);
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 12 }}>Ready to launch</div>
       <div style={{ background: "var(--color-background-secondary)", borderRadius: 6, padding: "10px 12px", fontSize: 10, lineHeight: 1.8 }}>
         <div><span style={{ color: "var(--color-text-secondary)" }}>Project:</span> {name || "—"}</div>
         <div><span style={{ color: "var(--color-text-secondary)" }}>Keywords:</span> {keywords.join(", ") || "—"}</div>
-        <div><span style={{ color: "var(--color-text-secondary)" }}>Sources:</span> {sources.join(", ") || "—"}</div>
+        <div><span style={{ color: "var(--color-text-secondary)" }}>Sources:</span> {selectedNames.join(", ") || "—"}</div>
       </div>
     </div>
   );
@@ -283,8 +563,10 @@ export default function ProjectCreate() {
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [keywords, setKeywords] = useState([]);
-  const [sources, setSources] = useState(["reddit", "twitter"]);
-  const [latency, setLatency] = useState({});
+  const [sources, setSources] = useState([]);  // UUIDs from global_sources, populated by StepSources
+  const [mode, setMode] = useState("live");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -309,10 +591,10 @@ export default function ProjectCreate() {
     mutate({
       name: name.trim(),
       keywords,
-      sources,
-      alert_rules: Object.fromEntries(
-        sources.map((s) => [s, { latency: latency[s] || "daily" }])
-      ),
+      selected_source_ids: sources,
+      alert_rules: {},
+      date_from: dateFrom ? new Date(dateFrom).toISOString() : null,
+      date_to: (dateTo && mode === "fixed") ? new Date(dateTo).toISOString() : null,
     });
   };
 
@@ -351,8 +633,8 @@ export default function ProjectCreate() {
           }}>
             {step === 0 && <StepName name={name} setName={setName} />}
             {step === 1 && <StepKeywords keywords={keywords} setKeywords={setKeywords} />}
-            {step === 2 && <StepSources sources={sources} setSources={setSources} />}
-            {step === 3 && <StepLatency sources={sources} latency={latency} setLatency={setLatency} />}
+            {step === 2 && <StepSources sources={sources} setSources={setSources} keywords={keywords} />}
+            {step === 3 && <StepDateRange dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} mode={mode} setMode={setMode} />}
             {step === 4 && <StepAlerts />}
             {step === 5 && <StepLaunch name={name} keywords={keywords} sources={sources} />}
           </div>

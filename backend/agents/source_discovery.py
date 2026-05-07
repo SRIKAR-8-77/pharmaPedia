@@ -112,8 +112,13 @@ Assess this source. Respond with JSON ONLY (no markdown, no explanation):
   "rss_url": "url or null",
   "is_reddit": true/false,
   "has_free_api": true/false,
-  "api_base_url": "url or null"
-}}"""
+  "api_base_url": "url or null",
+  "supports_date_filtering": true/false,
+  "fetch_url": "url or null"
+}}
+
+supports_date_filtering: true if the API accepts date/time query parameters (e.g. since=, from=, start_date=, dateFrom=, mindate=) so we can filter results by time range server-side.
+fetch_url: the most direct URL to fetch data from (RSS endpoint, API endpoint, or page URL)."""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -395,10 +400,11 @@ async def discover(keyword: str, existing_domains: set[str] | None = None) -> di
                             "category": "available",
                             "access_type": "rss",
                             "feed_url": assessment["rss_url"],
+                            "fetch_url": assessment.get("fetch_url") or assessment["rss_url"],
                             "api_url": None,
                             "relevance_score": relevance_score,
                             "reason": reason,
-                            "supports_date_range": False,
+                            "supports_date_range": bool(assessment.get("supports_date_filtering", False)),
                         })
                         continue
                     if assessment.get("has_free_api") and not available:
@@ -409,10 +415,11 @@ async def discover(keyword: str, existing_domains: set[str] | None = None) -> di
                             "category": "available",
                             "access_type": "api",
                             "feed_url": None,
+                            "fetch_url": assessment.get("fetch_url") or assessment.get("api_base_url") or url,
                             "api_url": assessment.get("api_base_url") or url,
                             "relevance_score": relevance_score,
                             "reason": reason,
-                            "supports_date_range": False,
+                            "supports_date_range": bool(assessment.get("supports_date_filtering", False)),
                         })
                         continue
                 except Exception as e:
