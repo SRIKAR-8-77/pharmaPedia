@@ -1,14 +1,14 @@
-# PharmaSignal
+# Pharmapedia
 
 > **Real-Time Social Listening Platform for Patient Safety & Pharmacovigilance**
 
-PharmaSignal is a full-stack intelligence platform that continuously monitors social media, clinical databases, and online communities for early signals of adverse drug events, treatment dissatisfaction, and patient safety concerns — filling the gap between what patients say online and what gets captured in formal pharmacovigilance systems.
+Pharmapedia is a full-stack intelligence platform that continuously monitors social media, clinical databases, and online communities for early signals of adverse drug events, treatment dissatisfaction, and patient safety concerns — filling the gap between what patients say online and what gets captured in formal pharmacovigilance systems.
 
 ---
 
 ## The Problem We Solve
 
-Healthcare institutions and pharma companies rely on voluntary adverse event reports (FAERS) and clinical trials for safety data. But patients talk about side effects on Reddit, Twitter, and health forums *months or years before* formal reports surface. PharmaSignal automates the listening, extraction, and analysis of this signal-rich patient-generated data — turning unstructured social content into structured, actionable safety intelligence.
+Healthcare institutions and pharma companies rely on voluntary adverse event reports (FAERS) and clinical trials for safety data. But patients talk about side effects on Reddit, Twitter, and health forums *months or years before* formal reports surface. Pharmapedia automates the listening, extraction, and analysis of this signal-rich patient-generated data — turning unstructured social content into structured, actionable safety intelligence.
 
 ---
 
@@ -45,7 +45,7 @@ Healthcare institutions and pharma companies rely on voluntary adverse event rep
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          PharmaSignal Platform                      │
+│                          Pharmapedia Platform                      │
 │                                                                     │
 │  ┌──────────────┐    ┌──────────────────────────────────────────┐  │
 │  │   React 19   │    │                FastAPI                    │  │
@@ -268,7 +268,7 @@ GEMINI_API_KEY=AIza...
 # Required for Reddit scraping — https://www.reddit.com/prefs/apps
 REDDIT_CLIENT_ID=your_client_id
 REDDIT_CLIENT_SECRET=your_client_secret
-REDDIT_USER_AGENT=PharmaSignal/1.0 by YourUsername
+REDDIT_USER_AGENT=Pharmapedia/1.0 by YourUsername
 
 # Optional — Twitter/X scraping (twitterapi.io key)
 TWITTER_API_KEY=your_twitterapi_io_key
@@ -310,8 +310,8 @@ Wait until both are healthy (~10 seconds):
 ```bash
 docker compose ps
 # NAME                   STATUS
-# pharmasignal_db        running (healthy)
-# pharmasignal_redis     running (healthy)
+# Pharmapedia_db        running (healthy)
+# Pharmapedia_redis     running (healthy)
 ```
 
 ### Terminal 2 — Backend API
@@ -391,7 +391,7 @@ This removes the project and all its posts, signals, and canvas cards.
 ### Level 2 — Wipe all data, keep the schema
 
 ```bash
-docker exec -it pharmasignal_db psql -U pharmasignal -d pharmasignal -c "
+docker exec -it Pharmapedia_db psql -U Pharmapedia -d Pharmapedia -c "
 TRUNCATE TABLE audit_logs, canvas_states, safety_signals, enriched_posts,
                pii_queue, raw_posts, project_global_sources, source_configs,
                projects RESTART IDENTITY CASCADE;
