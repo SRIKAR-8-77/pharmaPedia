@@ -1,6 +1,7 @@
 import { NavLink, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { listProjects } from "../../api/client";
+import logo from "../../assets/logo.jpg";
 
 const NAV = [
   { to: "dashboard", label: "Dashboard",    dot: "green" },
@@ -47,14 +48,27 @@ export default function Sidebar() {
     }}>
       {/* Logo */}
       <div style={{
-        padding: "10px 10px 10px",
+        padding: "12px 10px 10px",
         borderBottom: "0.5px solid var(--color-border-tertiary)",
         marginBottom: 8,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 6,
       }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-primary)", lineHeight: 1.2 }}>
-          PharmaSignal
-        </div>
-        <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>
+        <img
+          src={logo}
+          alt="PharmaSignal"
+          style={{
+            width: "100%",
+            maxWidth: 120,
+            height: "auto",
+            borderRadius: 8,
+            objectFit: "contain",
+            display: "block",
+          }}
+        />
+        <div style={{ fontSize: 10, color: "var(--color-text-secondary)", textAlign: "center" }}>
           {active?.name || "Social Intelligence"}
         </div>
       </div>
