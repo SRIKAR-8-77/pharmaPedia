@@ -1,7 +1,221 @@
 # PharmaSignal
 
-Real-Time Social Intelligence Platform for Patient Safety.
-Monitors drug-related discussions across social platforms and applies NLP to detect adverse events.
+> **Real-Time Social Listening Platform for Patient Safety & Pharmacovigilance**
+
+PharmaSignal is a full-stack intelligence platform that continuously monitors social media, clinical databases, and online communities for early signals of adverse drug events, treatment dissatisfaction, and patient safety concerns — filling the gap between what patients say online and what gets captured in formal pharmacovigilance systems.
+
+---
+
+## The Problem We Solve
+
+Healthcare institutions and pharma companies rely on voluntary adverse event reports (FAERS) and clinical trials for safety data. But patients talk about side effects on Reddit, Twitter, and health forums *months or years before* formal reports surface. PharmaSignal automates the listening, extraction, and analysis of this signal-rich patient-generated data — turning unstructured social content into structured, actionable safety intelligence.
+
+---
+
+## What We Built
+
+### Part 1 — Generic Social Monitoring Engine
+
+| Requirement | Implementation |
+|-------------|---------------|
+| Multi-project workspace | Project CRUD with keywords, date ranges, pause/resume state |
+| Configurable keyword monitoring | Per-project keyword sets matched against all scraped content |
+| Multiple source types | 7 scraper engines: Reddit, Twitter/X, PubMed, FAERS, Google News, RSS, Generic API |
+| Per-source latency configuration | Real-time / Daily / Weekly scheduling via Celery Beat |
+| Admin UI for source management | Full admin panel — add, edit, delete, test any source |
+| Pluggable engine architecture | Factory-pattern scraper registry — new engines drop in as a single Python class |
+| UI for project configuration | React 19 frontend with project wizard, source selector, alert rules |
+
+### Part 2 — Analysis & Intelligence Layer
+
+| Requirement | Implementation |
+|-------------|---------------|
+| Entity extraction | 7-step NLP pipeline: spaCy + scispaCy NER for drugs, symptoms, conditions |
+| Individual content sentiment | VADER with medical term weights + HuggingFace RoBERTa transformer |
+| Overall source sentiment & trends | Aggregated trend timelines per source and per drug |
+| Safety & adverse event detection | Two-pass severity scoring (HIGH / MED / LOW) with causality analysis |
+| Signal timeline view | Timeline dashboard with volume charts, spike detection, signal feed |
+| Explainability & confidence scores | Every signal carries a confidence score, matched keywords, and extraction trace |
+| PII / PHI flagging | Microsoft Presidio detects PERSON, EMAIL, PHONE, SSN, IP — routed to human review queue |
+| Traceability | Full audit log: source → raw post → enriched post → signal → action |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          PharmaSignal Platform                      │
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────────────────────────────────┐  │
+│  │   React 19   │    │                FastAPI                    │  │
+│  │   Frontend   │◄──►│  Projects · Signals · Canvas · Reports   │  │
+│  │   (Vite)     │    │  Admin · Knowledge · Copilot · WebSocket  │  │
+│  └──────────────┘    └──────────────┬───────────────────────────┘  │
+│                                     │                               │
+│  ┌──────────────────────────────────▼──────────────────────────┐   │
+│  │                      Celery Task Queue (Redis)               │   │
+│  │   Scrape Tasks   │   Pipeline Tasks   │   Report Generation  │   │
+│  └────────┬─────────┴─────────┬──────────┴──────────┬──────────┘   │
+│           │                   │                      │              │
+│  ┌────────▼──────────┐  ┌────▼─────────────────┐   │              │
+│  │  Scraper Registry │  │  7-Step NLP Pipeline  │   │              │
+│  │  ─────────────── │  │  ─────────────────── │   │              │
+│  │  Reddit (PRAW)    │  │  1. Clean + Lang Det  │   │              │
+│  │  Twitter/X        │  │  2. PII Detection     │   │              │
+│  │  PubMed (API)     │  │  3. NER Extraction    │   │              │
+│  │  FAERS (FDA)      │  │  4. Sentiment Scoring │   │              │
+│  │  Google News      │  │  5. Signal Detection  │   │              │
+│  │  RSS Feeds        │  │  6. Deduplication     │   │              │
+│  │  Generic API      │  │  7. Persist + Audit   │   │              │
+│  └───────────────────┘  └──────────────────────┘   │              │
+│                                                      │              │
+│  ┌───────────────────────────────────────────────────▼──────────┐  │
+│  │                     PostgreSQL (18 tables)                    │  │
+│  │  Projects · Posts · Signals · PII Queue · Canvas · AuditLog  │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────────────────┐   ┌──────────────────────────────────┐   │
+│  │   Knowledge Layer    │   │        AI / Agent Layer          │   │
+│  │  OpenFDA drug labels │   │  Gemini Flash Copilot (4 tools)  │   │
+│  │  RxNorm normalization│   │  Source Discovery Agent          │   │
+│  │  MedDRA classification│  │  AI Triage Assistant             │   │
+│  └──────────────────────┘   └──────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Key Differentiators
+
+### 1. Pluggable Scraper Registry
+Adding a new data source requires writing a single Python class that inherits from `BaseScraper`. The admin UI auto-discovers it and exposes it for project configuration — no core code changes needed.
+
+```python
+class MyForumScraper(BaseScraper):
+    source_type = "my_forum"
+    def fetch(self, keywords, config) -> list[RawPost]: ...
+```
+
+### 2. Pharmacovigilance-Grade Signal Detection
+Our signal detection pipeline is deterministic and traceable by design — no LLM black-box in the hot path. Every detected signal carries:
+- **Confidence score** (0.0–1.0) based on keyword density, entity presence, and syntactic patterns
+- **Known vs. novel flag** — cross-referenced against OpenFDA drug labels to highlight truly new effects
+- **Causality score** — proximity analysis of drug mentions to adverse effect mentions
+- **MedDRA code** — standardized medical terminology classification
+
+### 3. Privacy-First Architecture
+PII/PHI is detected at ingestion (Step 2) before any analysis runs. Flagged content is routed to a human review queue with three actions: approve-redacted, delete, or mark-as-false-positive. All decisions are audit-logged.
+
+### 4. AI-Augmented Triage (Agentic Capability)
+The AI Copilot (Gemini Flash with function calling) can answer natural language questions like "Which drugs have the most HIGH severity signals this week?" or "Show me posts mentioning nausea for ozempic" — invoking structured backend tools to retrieve real data, not hallucinate it.
+
+### 5. AI-Powered Source Discovery
+An agentic source discovery module takes a drug name and automatically finds relevant Reddit communities, health forums, and online communities — then adds them to a project with one click.
+
+### 6. Real-Time Signal Streaming
+WebSocket endpoint streams newly detected signals to the dashboard in real time as the pipeline processes batches — no refresh needed.
+
+### 7. Automated Intelligence Reports
+Weekly automated reports aggregate signal trends, sentiment shifts, and novel adverse events into a structured safety summary with AI-generated narrative insights — exportable as HTML for regulatory submission workflows.
+
+---
+
+## Data Sources
+
+| Source | Type | Auth | Content |
+|--------|------|------|---------|
+| **Reddit** | Social Forum | OAuth (PRAW) + RSS fallback | Patient communities, drug discussions |
+| **Twitter / X** | Microblog | twitterapi.io key | Real-time drug mentions, hashtags |
+| **PubMed** | Clinical Literature | Free API | Research abstracts, case reports |
+| **FAERS** | Regulatory | Free FDA API | Official adverse event reports |
+| **Google News** | News RSS | None | News articles about drugs/safety |
+| **RSS Feeds** | Generic | None | Patient blogs, health forums |
+| **Generic API** | Configurable | Optional | Any JSON API endpoint |
+
+---
+
+## NLP Pipeline (7 Steps)
+
+```
+Raw Post
+  │
+  ▼
+Step 1: Clean        — HTML decode, URL/mention strip, language detection, length validation
+  │
+  ▼
+Step 2: PII Detect   — Presidio: PERSON, EMAIL, PHONE, SSN, IP_ADDRESS → PII Queue
+  │
+  ▼
+Step 3: NER Extract  — spaCy + scispaCy: drugs, symptoms, conditions + RxNorm normalization
+  │
+  ▼
+Step 4: Sentiment    — VADER (medical weights) + HuggingFace RoBERTa (clinical transformer)
+  │
+  ▼
+Step 5: Signal Det.  — Two-pass severity scoring, causality analysis, OpenFDA novelty check
+  │
+  ▼
+Step 6: Dedup        — MinHash LSH (85% similarity threshold) — discard near-duplicates
+  │
+  ▼
+Step 7: Persist      — EnrichedPost, SafetySignal, AuditLog written to PostgreSQL
+```
+
+---
+
+## Features at a Glance
+
+### Dashboard
+- Real-time volume charts, sentiment distribution, signal severity breakdown
+- Live signal feed (HIGH / MED / LOW) with drug and symptom tags
+- One-click scrape trigger and pipeline run
+- Spike detection alerts for sudden volume increases
+
+### Signal Triage
+- Filter signals by severity, drug, symptom, date range
+- Manual triage actions: escalate, monitor, dismiss
+- AI-assisted triage recommendations with explanation
+- Confidence scores and extraction evidence for every signal
+
+### AI Canvas (Knowledge Graph)
+- Interactive node graph: drugs → symptoms → signals
+- Click any node to open the signal detail sidebar
+- "Add as insight card" to build a visual safety narrative
+- AI Copilot panel for natural language querying
+
+### Reports
+- Generate structured safety reports with signal summaries
+- AI-generated narrative: trends, emerging risks, recommendations
+- HTML export ready for regulatory workflows
+- Automated weekly digest scheduling
+
+### Admin Panel
+- Source management: add, edit, delete, test any scraper engine
+- PII review queue with human-in-the-loop actions
+- Pipeline health metrics: posts/hour, error rates, last run timestamps
+- Compliance settings: data retention periods, GDPR erasure, audit log export
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend API | FastAPI (Python 3.11) |
+| Task Queue | Celery + Redis |
+| Database | PostgreSQL 15 (SQLAlchemy 2.0) |
+| NLP | spaCy, scispaCy, VADER, HuggingFace Transformers |
+| PII Detection | Microsoft Presidio |
+| AI / Agents | Google Gemini Flash (function calling) |
+| Drug Knowledge | OpenFDA API, RxNorm API |
+| Medical Ontology | MedDRA (via terminology classification) |
+| Deduplication | datasketch MinHash LSH |
+| Frontend | React 19 + Vite |
+| Charts | Recharts |
+| Data Fetching | React Query + Axios |
+| Containerization | Docker + Docker Compose |
+| Deployment | Railway.app |
 
 ---
 
@@ -19,32 +233,33 @@ Monitors drug-related discussions across social platforms and applies NLP to det
 
 ```
 PharmaPedia/
-├── backend/           # FastAPI + Celery (Python 3.11)
-│   ├── api/routes/    # REST endpoints
-│   ├── pipeline/      # 7-step NLP processing pipeline
-│   ├── scrapers/      # Reddit, PubMed, FAERS, RSS, Twitter, Google News
-│   ├── models/        # SQLAlchemy DB models + Pydantic schemas
-│   ├── tasks/         # Celery async tasks
-│   ├── agents/        # AI source discovery + copilot (Gemini Flash)
-│   ├── knowledge/     # OpenFDA + RxNorm integrations
-│   ├── main.py        # FastAPI entry point
-│   ├── config.py      # App settings
-│   ├── .env           # Secrets — edit before first run
+├── backend/
+│   ├── api/routes/        # REST endpoints (projects, signals, canvas, admin, reports…)
+│   ├── pipeline/          # 7-step NLP processing pipeline
+│   ├── scrapers/          # Reddit, PubMed, FAERS, RSS, Twitter, Google News, Generic API
+│   ├── models/            # SQLAlchemy DB models (18 tables) + Pydantic schemas
+│   ├── tasks/             # Celery async tasks (scrape, pipeline, reports)
+│   ├── agents/            # AI source discovery + copilot (Gemini Flash)
+│   ├── knowledge/         # OpenFDA + RxNorm integrations
+│   ├── main.py            # FastAPI entry point
+│   ├── config.py          # App settings
+│   ├── .env               # Secrets — edit before first run
 │   └── requirements.txt
-├── frontend/          # React 19 + Vite
-│   ├── src/pages/     # Dashboard, Signals, Canvas, Admin, Reports…
-│   ├── src/api/       # Axios API client
-│   └── .env           # VITE_API_URL (default: http://localhost:8000)
-└── docker-compose.yml # PostgreSQL + Redis + Celery services
+├── frontend/
+│   ├── src/pages/         # Dashboard, Signals, Canvas, Admin, Reports, Projects
+│   ├── src/components/    # Layout, EntityPill, SeverityBadge, Pagination
+│   ├── src/api/           # Axios API client
+│   └── .env               # VITE_API_URL (default: http://localhost:8000)
+└── docker-compose.yml     # PostgreSQL + Redis + Celery services
 ```
 
 ---
 
-## One-Time Setup
+## Quick Start
 
-### 1 — Configure API keys
+### Step 1 — Configure API keys
 
-Edit `backend/.env`:
+Copy and edit `backend/.env`:
 
 ```env
 # Required for AI Copilot — free key at https://aistudio.google.com/apikey
@@ -55,11 +270,11 @@ REDDIT_CLIENT_ID=your_client_id
 REDDIT_CLIENT_SECRET=your_client_secret
 REDDIT_USER_AGENT=PharmaSignal/1.0 by YourUsername
 
-# Optional — Twitter/X scraping
+# Optional — Twitter/X scraping (twitterapi.io key)
 TWITTER_API_KEY=your_twitterapi_io_key
 ```
 
-### 2 — Install backend dependencies (once)
+### Step 2 — Install backend dependencies (once)
 
 ```bash
 cd backend
@@ -70,7 +285,7 @@ source .venv/bin/activate        # Linux / Mac
 pip install -r requirements.txt
 ```
 
-### 3 — Install frontend dependencies (once)
+### Step 3 — Install frontend dependencies (once)
 
 ```bash
 cd frontend
@@ -79,18 +294,18 @@ npm install
 
 ---
 
-## Running the Project
+## Starting the Platform
 
-You need **4 things** running at the same time: Postgres + Redis, the API server, a Celery worker, and the frontend. Open 3 terminals.
+You need **4 things** running simultaneously: Postgres + Redis, the API server, a Celery worker, and the frontend. Open 4 terminals.
 
-### Terminal 1 — Start the database and message broker
+### Terminal 1 — Infrastructure (database + message broker)
 
 ```bash
 # From the project root
 docker compose up -d postgres redis
 ```
 
-Wait until both are healthy (takes ~10 seconds):
+Wait until both are healthy (~10 seconds):
 
 ```bash
 docker compose ps
@@ -99,7 +314,7 @@ docker compose ps
 # pharmasignal_redis     running (healthy)
 ```
 
-### Terminal 2 — Start the backend API
+### Terminal 2 — Backend API
 
 ```bash
 cd backend
@@ -110,10 +325,12 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 The database schema is created automatically on first startup.
 You should see: `Application startup complete.`
 
-> API:       http://localhost:8000
-> Swagger docs: http://localhost:8000/docs
+```
+API:          http://localhost:8000
+Swagger docs: http://localhost:8000/docs
+```
 
-### Terminal 3 — Start the Celery worker (background tasks)
+### Terminal 3 — Celery worker (background tasks)
 
 ```bash
 cd backend
@@ -123,66 +340,55 @@ celery -A tasks.celery_app worker --loglevel=info --concurrency=4 -Q celery,pipe
 
 You should see: `celery@... ready.`
 
-### Terminal 4 — Start the frontend
+### Terminal 4 — Frontend
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-> App: http://localhost:5173
+```
+App: http://localhost:5173
+```
 
-All four are now running. Open http://localhost:5173 to use the app.
+All four are now running. Open **http://localhost:5173** to use the platform.
 
 ---
 
-## Shutting Down
+## Stopping the Platform
 
-### Stop the frontend and backend (quick)
+### Quick stop (keeps data)
 
-Press `Ctrl + C` in each terminal (frontend, API, Celery). That's enough to stop all Python and Node processes.
-
-### Also stop the database and Redis
+Press `Ctrl + C` in each terminal (frontend, API, Celery worker), then:
 
 ```bash
 # From the project root
 docker compose stop
 ```
 
-This stops the containers but keeps all your data intact. Next time you run `docker compose up -d postgres redis`, all projects, signals, and posts are still there.
+This stops the containers but preserves all your data. Running `docker compose up -d postgres redis` again restores everything exactly as you left it.
 
-### Full shutdown — stop and remove containers (data is still safe)
+### Full stop (containers removed, data preserved)
 
 ```bash
 docker compose down
 ```
 
-Data is preserved in Docker volumes (`postgres_data`, `redis_data`). Running `docker compose up -d postgres redis` again restores everything.
+Data is preserved in Docker volumes (`postgres_data`, `redis_data`).
 
 ---
 
-## Deleting Data and Starting Fresh
-
-Choose the level of reset you need:
-
----
+## Resetting Data
 
 ### Level 1 — Delete a single project (from the UI)
 
 1. Open http://localhost:5173
 2. Go to **Projects**
-3. Click the project you want to remove
-4. Click **Delete project**
+3. Click the project → **Delete project**
 
 This removes the project and all its posts, signals, and canvas cards.
 
----
-
 ### Level 2 — Wipe all data, keep the schema
-
-Use this to clear every project, post, and signal without touching the database schema (tables remain, ready to use immediately).
-
-Make sure the backend is running, then:
 
 ```bash
 docker exec -it pharmasignal_db psql -U pharmasignal -d pharmasignal -c "
@@ -199,26 +405,17 @@ Restart the backend after truncating:
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
----
-
 ### Level 3 — Complete wipe (schema + data + volumes)
 
-Use this to go back to a completely blank slate — as if you just cloned the repo.
-
 ```bash
-# 1. Stop everything (Ctrl+C in each terminal first, then:)
+# 1. Stop everything (Ctrl+C in each terminal first)
 docker compose down -v
-```
 
-The `-v` flag deletes the Docker volumes, permanently removing all data.
-
-```bash
-# 2. Start fresh infrastructure
+# 2. Restart infrastructure
 docker compose up -d postgres redis
 
-# 3. Restart the backend (recreates schema automatically)
-cd backend
-source .venv/bin/activate
+# 3. Restart backend (recreates schema automatically)
+cd backend && source .venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # 4. Restart Celery (new terminal)
@@ -228,22 +425,18 @@ celery -A tasks.celery_app worker --loglevel=info --concurrency=4 -Q celery,pipe
 # 5. Frontend was already running — no restart needed
 ```
 
-You now have a completely empty database.
-
 ---
 
 ## Using the App
 
-Once everything is running:
-
-1. Go to http://localhost:5173
-2. Create a **Project** — give it a name, add drug keywords (e.g. `ozempic`, `semaglutide`), pick sources (Reddit, RSS)
-3. Click **Run Pipeline** — scrapes posts and runs the NLP pipeline
-4. **Dashboard** — volume charts, sentiment, top symptoms
-5. **Signals** — detected adverse events with severity (HIGH / MED / LOW); triage them manually or via AI
-6. **AI Canvas** — click nodes in the knowledge graph to open the signal sidebar; use "Add as insight card" to build a canvas; ask the AI Copilot questions in the right panel
-7. **Reports** — export a structured safety report
-8. **Admin** — pipeline health, PII review queue, compliance settings
+1. Open **http://localhost:5173**
+2. Create a **Project** — add a name, drug keywords (e.g. `ozempic`, `semaglutide`), pick sources (Reddit, FAERS, RSS)
+3. Click **Run Pipeline** — scrapes posts and runs the full NLP pipeline
+4. **Dashboard** — volume charts, sentiment distribution, signal severity timeline
+5. **Signals** — detected adverse events with severity (HIGH / MED / LOW); triage manually or via AI
+6. **AI Canvas** — click nodes in the knowledge graph; use "Add as insight card" to build a visual safety narrative; ask the AI Copilot natural language questions in the right panel
+7. **Reports** — generate and export a structured safety report as HTML
+8. **Admin** — manage scraper sources, review PII queue, check pipeline health, configure compliance settings
 
 ---
 
@@ -280,16 +473,24 @@ Once everything is running:
 
 **Celery tasks queue but never run**
 → Check `docker compose ps redis` shows `(healthy)`.
-→ Make sure the Celery terminal is open and shows `celery@... ready.`
+→ Make sure the Celery terminal shows `celery@... ready.`
 
 **AI Copilot says "requires a Gemini API key"**
 → Add `GEMINI_API_KEY=AIza...` to `backend/.env` and restart the backend.
 
 **AI Copilot says "rate limit reached"**
-→ Free Gemini tier quota is exhausted for today. It resets at midnight Pacific. All other features work normally.
+→ Free Gemini tier quota is exhausted for today. Resets at midnight Pacific. All other features work normally.
 
 **CORS errors in browser console**
 → The frontend URL must be in `CORS_ORIGINS` in `backend/config.py` (default includes `localhost:5173`).
 
 **`docker compose down -v` deleted my data by mistake**
-→ Unfortunately Docker volumes are not recoverable once deleted with `-v`. Always use `docker compose stop` (no `-v`) if you want to preserve data.
+→ Docker volumes are not recoverable once deleted with `-v`. Always use `docker compose stop` (without `-v`) to preserve data.
+
+---
+
+## Repository & Links
+
+- **Repository:** https://github.com/SRIKAR-8-77/PharmaPedia
+- **Live Demo:** Deployed on Railway.app
+- **API Docs:** http://localhost:8000/docs (Swagger UI when running locally)
