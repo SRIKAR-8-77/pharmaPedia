@@ -19,7 +19,6 @@ RUN uv pip install --system --no-cache -r requirements.txt
 RUN python -m spacy download en_core_web_sm
 
 COPY . .
-RUN chmod +x start.sh
 
 EXPOSE 8000
-CMD ["sh", "start.sh"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
