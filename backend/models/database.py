@@ -336,27 +336,35 @@ async def init_db():
             else:
                 raise
 
-    # Seed baseline global sources — idempotent (ON CONFLICT DO NOTHING)
-    seed_sql = text("""
-        INSERT INTO global_sources
-            (domain, name, source_type, url, feed_url, scraper_config,
-             reliability_tier, is_active, supports_date_range)
-        VALUES
-          ('api.fda.gov', 'FDA FAERS API', 'faers',
-           'https://api.fda.gov/drug/event.json', NULL, '{}', 1, TRUE, TRUE),
-          ('pubmed.ncbi.nlm.nih.gov', 'PubMed E-Utilities', 'pubmed',
-           'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/', NULL, '{}', 1, TRUE, TRUE),
-          ('news.google.com', 'Google News RSS', 'google_news',
-           'https://news.google.com/rss/search',
-           'https://news.google.com/rss/search?q={keyword}+adverse+effects&hl=en-US',
-           '{}', 2, TRUE, TRUE),
-          ('reddit.com', 'Reddit', 'reddit',
-           'https://www.reddit.com',
-           'https://www.reddit.com/search.rss?q={keyword}+side+effects&sort=new',
-           '{}', 2, TRUE, TRUE)
-        ON CONFLICT (domain) DO NOTHING
-    """)
-    async with AsyncSessionLocal() as session:
-        await session.execute(seed_sql)
-        await session.commit()
-    print("DB initialised and sources seeded.")
+    # Seed baseline global sources — idempotent, non-fatal
+    _SOURCES = [
+        ("api.fda.gov", "FDA FAERS API", "faers",
+         "https://api.fda.gov/drug/event.json", None, 1, True),
+        ("pubmed.ncbi.nlm.nih.gov", "PubMed E-Utilities", "pubmed",
+         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", None, 1, True),
+        ("news.google.com", "Google News RSS", "google_news",
+         "https://news.google.com/rss/search",
+         "https://news.google.com/rss/search?q={keyword}+adverse+effects&hl=en-US", 2, True),
+        ("reddit.com", "Reddit", "reddit",
+         "https://www.reddit.com",
+         "https://www.reddit.com/search.rss?q={keyword}+side+effects&sort=new", 2, True),
+    ]
+    try:
+        async with AsyncSessionLocal() as session:
+            for domain, name, stype, url, feed_url, tier, sdr in _SOURCES:
+                await session.execute(
+                    text("""
+                        INSERT INTO global_sources
+                            (domain, name, source_type, url, feed_url,
+                             scraper_config, reliability_tier, is_active, supports_date_range)
+                        VALUES (:domain, :name, :stype, :url, :feed_url,
+                                :cfg, :tier, TRUE, :sdr)
+                        ON CONFLICT (domain) DO NOTHING
+                    """),
+                    {"domain": domain, "name": name, "stype": stype, "url": url,
+                     "feed_url": feed_url, "cfg": "{}", "tier": tier, "sdr": sdr},
+                )
+            await session.commit()
+        print("DB initialised and sources seeded.")
+    except Exception as e:
+        print(f"Seed skipped (non-fatal): {e}")
