@@ -321,5 +321,16 @@ async def get_db():
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    import asyncio
+    for attempt in range(10):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            return
+        except Exception as e:
+            if attempt < 9:
+                wait = min(2 ** attempt, 30)
+                print(f"DB not ready (attempt {attempt + 1}/10), retrying in {wait}s: {e}")
+                await asyncio.sleep(wait)
+            else:
+                raise
