@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from typing import List
 
 
@@ -6,6 +7,22 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://pharmasignal:pharmasignal_secret@localhost:5432/pharmasignal"
     DATABASE_URL_SYNC: str = "postgresql://pharmasignal:pharmasignal_secret@localhost:5432/pharmasignal"
+
+    @model_validator(mode="after")
+    def fix_db_urls(self) -> "Settings":
+        # Normalise legacy postgres:// scheme (used by some Railway addons)
+        for attr in ("DATABASE_URL", "DATABASE_URL_SYNC"):
+            val = getattr(self, attr)
+            if val.startswith("postgres://"):
+                setattr(self, attr, val.replace("postgres://", "postgresql://", 1))
+
+        # Ensure async driver for SQLAlchemy async engine
+        if not self.DATABASE_URL.startswith("postgresql+asyncpg://"):
+            self.DATABASE_URL = self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Ensure sync URL has no asyncpg
+        self.DATABASE_URL_SYNC = self.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return self
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
