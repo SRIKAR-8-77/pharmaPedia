@@ -30,7 +30,9 @@ services:
       retries: 5
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.ml
     container_name: pharmasignal_api
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     ports:
@@ -52,7 +54,9 @@ services:
     restart: unless-stopped
 
   celery_worker:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.ml
     container_name: pharmasignal_worker
     command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2 -Q celery,pipeline,scrape
     environment:
@@ -72,7 +76,9 @@ services:
     restart: unless-stopped
 
   celery_beat:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.ml
     container_name: pharmasignal_beat
     command: celery -A tasks.celery_app beat --loglevel=info
     environment:
